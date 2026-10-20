@@ -4,3 +4,5 @@ build/
 .clang-format
 .dir-locals.el
 compile_commands.json
+#*#
+*~

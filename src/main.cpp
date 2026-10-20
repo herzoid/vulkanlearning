@@ -1,7 +1,7 @@
 #include "application.hpp"
 #include <external/CLI11.hpp>
-#include <iostream>
 #include <external/json.hpp>
+#include <iostream>
 #include <stdexcept>
 using json = nlohmann::json;
 

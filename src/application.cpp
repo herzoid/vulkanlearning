@@ -3,14 +3,15 @@
 // ─── Стандартная библиотека ───
 #include <array>
 #include <chrono>
+#include <cmath>
 #include <cstring>
 #include <fstream>
 #include <iostream>
 #include <limits>
 #include <set>
 #include <stdexcept>
+#include <utility>
 #include <vector>
-#include <cmath>
 
 // #include <vulkan/vulkan_core.h>
 
@@ -150,12 +151,8 @@ void HelloTriangleApplication::initVulkan() {
   createColorResources();
   createDepthResources();
   createFramebuffers();
-  loadGltfModel(modelPath, vertices, indices);
-  createTextureImage();
-  createTextureImageView();
-  createTextureSampler();
-  // loadModel();
-
+  loadGltfModel(modelPath);
+  createTextures();
   createVertexBuffer();
   createIndexBuffer();
   createUniformBuffers();
@@ -226,10 +223,12 @@ void HelloTriangleApplication::cleanup() {
 
   vkDestroyDescriptorPool(device, descriptorPool, nullptr);
 
-  vkDestroySampler(device, textureSampler, nullptr);
-  vkDestroyImageView(device, textureImageView, nullptr);
-  vkDestroyImage(device, textureImage, nullptr);
-  vkFreeMemory(device, textureImageMemory, nullptr);
+  for (auto &tex : textures) {
+    vkDestroySampler(device, tex.sampler, nullptr);
+    vkDestroyImageView(device, tex.view, nullptr);
+    vkDestroyImage(device, tex.image, nullptr);
+    vkFreeMemory(device, tex.memory, nullptr);
+  }
 
   vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
 
@@ -880,13 +879,12 @@ bool HelloTriangleApplication::hasStencilComponent(VkFormat format) {
 //   }
 // }
 
-bool HelloTriangleApplication::loadGltfModel(const std::string &filename,
-                                             std::vector<Vertex> &vertices,
-                                             std::vector<uint32_t> &indices) {
+bool HelloTriangleApplication::loadGltfModel(const std::string &filename) {
   tinygltf::Model model;
   tinygltf::TinyGLTF loader;
   std::string err, warn;
 
+  // ---------Callback for images decoding------------
   loader.SetImageLoader(
       [](tinygltf::Image *image, const int image_idx, std::string *err,
          std::string *warn, int req_width, int req_height,
@@ -914,6 +912,7 @@ bool HelloTriangleApplication::loadGltfModel(const std::string &filename,
       nullptr // user_data
   );
 
+  // ----------Checking for magic header--------------
   std::ifstream file(filename, std::ios::binary);
   if (!file.is_open()) {
     throw std::runtime_error("Failed to open file: " + filename);
@@ -929,6 +928,7 @@ bool HelloTriangleApplication::loadGltfModel(const std::string &filename,
         "Model format not supported. Only binary glTF (.glb) is allowed.\n");
   }
 
+  // ----------Loading model---------------
   bool ret = false;
   ret = loader.LoadBinaryFromFile(&model, &err, &warn, filename);
 
@@ -945,102 +945,216 @@ bool HelloTriangleApplication::loadGltfModel(const std::string &filename,
     return false;
   }
 
-  std::cout << "Meshes: " << model.meshes.size() << std::endl;
-  std::cout << "Images: " << model.images.size() << std::endl;
-  std::cout << "Materials: " << model.materials.size() << std::endl;
-  std::cout << "Textures: " << model.textures.size() << std::endl;
+  std::cout << "Meshes: " << model.meshes.size()
+            << "\nImages: " << model.images.size()
+            << "\nMaterials: " << model.materials.size()
+            << "\nTextures: " << model.textures.size() << std::endl;
 
-  // Достаем вершины. В glTF данные лежат в буферах, доступ к которым идет
-  // через accessors.
-  const tinygltf::Mesh &mesh = model.meshes[0];
-  const tinygltf::Primitive &primitive = mesh.primitives[0];
+  // ----------Cleaning old data---------------
+  vertices.clear();
+  indices.clear();
+  meshes.clear();
+  loadedTextures.clear();
 
-  // Получаем позиции вершин
-  const tinygltf::Accessor &posAccessor =
-      model.accessors[primitive.attributes.find("POSITION")->second];
-  const tinygltf::BufferView &posView =
-      model.bufferViews[posAccessor.bufferView];
-  const tinygltf::Buffer &posBuffer = model.buffers[posView.buffer];
-  const float *positions = reinterpret_cast<const float *>(
-      &posBuffer.data[posView.byteOffset + posAccessor.byteOffset]);
-
-  // Получаем текстурные координаты (если есть)
-  const float *texCoords = nullptr;
-  auto texCoordIter = primitive.attributes.find("TEXCOORD_0");
-  if (texCoordIter != primitive.attributes.end()) {
-    const tinygltf::Accessor &texAccessor =
-        model.accessors[texCoordIter->second];
-    const tinygltf::BufferView &texView =
-        model.bufferViews[texAccessor.bufferView];
-    const tinygltf::Buffer &texBuffer = model.buffers[texView.buffer];
-    texCoords = reinterpret_cast<const float *>(
-        &texBuffer.data[texView.byteOffset + texAccessor.byteOffset]);
+  //-----------Loading all textures (only pixels)-----------
+  for (const auto &img : model.images) {
+    TextureData tex;
+    tex.width = img.width;
+    tex.height = img.height;
+    tex.pixels = img.image;
+    loadedTextures.push_back(std::move(tex));
   }
 
-  // Проходим по вершинам и заполняем ваш вектор vertices
-  for (size_t i = 0; i < posAccessor.count; ++i) {
-    Vertex vert;
-    vert.pos =
-        glm::vec3(positions[i * 3], positions[i * 3 + 1], positions[i * 3 + 2]);
-    if (texCoords) {
-      vert.texCoord = glm::vec2(texCoords[i * 2], texCoords[i * 2 + 1]);
-    } else {
-      vert.texCoord = glm::vec2(0.0f);
+  //-----------Fallback texture--------------
+  if (loadedTextures.empty()) {
+    std::cout << "No textures in model, adding white fallback color"
+              << std::endl;
+    TextureData fallback;
+    fallback.width = 1;
+    fallback.height = 1;
+    fallback.pixels = {255, 255, 255, 255};
+    loadedTextures.push_back(std::move(fallback));
+  }
+
+  //--------Find all meshes and primitives-----------
+  for (const auto &mesh : model.meshes) {
+    for (const auto &primitive : mesh.primitives) {
+      if (primitive.mode != TINYGLTF_MODE_TRIANGLES)
+        continue;
+      // Define the texture for the primitive
+      int32_t texIdx = -1;
+      if (primitive.material >= 0) {
+        const auto &mat = model.materials[primitive.material];
+        int texInfoIdx = mat.pbrMetallicRoughness.baseColorTexture.index;
+        if (texInfoIdx >= 0 && texInfoIdx < (int)model.images.size()) {
+          int imgIdx = model.textures[texInfoIdx].source;
+          if (imgIdx >= 0 && imgIdx < (int)model.images.size()) {
+            texIdx = imgIdx;
+          }
+        }
+      }
+      // If no texture - use fallback texture
+      if (texIdx < 0) {
+        texIdx = static_cast<int>(loadedTextures.size()) - 1;
+      }
+
+      // Vertices positions
+      auto posIt = primitive.attributes.find("POSITION");
+      if (posIt == primitive.attributes.end())
+        continue;
+
+      const auto &posAcc = model.accessors[posIt->second];
+      const auto &posView = model.bufferViews[posAcc.bufferView];
+      const auto &posBuf = model.buffers[posView.buffer];
+      const float *positions = reinterpret_cast<const float *>(
+          &posBuf.data[posView.byteOffset + posAcc.byteOffset]);
+
+      //------Texture coordinates----------
+      const float *texCoords = nullptr;
+      auto texIt = primitive.attributes.find("TEXCOORD_0");
+      if (texIt != primitive.attributes.end()) {
+        const auto &texAcc = model.accessors[texIt->second];
+        const auto &texView = model.bufferViews[texAcc.bufferView];
+        const auto &texBuf = model.buffers[texView.buffer];
+        texCoords = reinterpret_cast<const float *>(
+            &texBuf.data[texView.byteOffset + texAcc.byteOffset]);
+      }
+
+      // The begining of the primitive's vertices
+      uint32_t vertexBase = static_cast<uint32_t>(vertices.size());
+
+      //---------Filling the vertices-----------------
+      for (size_t i = 0; i < posAcc.count; ++i) {
+        Vertex v{};
+        v.pos = {positions[i * 3 + 0], positions[i * 3 + 1],
+                 positions[i * 3 + 2]};
+        v.texCoord = texCoords ? glm::vec2(texCoords[i * 2 + 0],
+                                           texCoords[i * 2 + 1])
+                               : glm::vec2(0.0f);
+        v.color = glm::vec3(1.0f);
+        vertices.push_back(v);
+      }
+
+      // The beginning of the indices
+      uint32_t indexStart = static_cast<uint32_t>(indices.size());
+
+      //---------Filling the indices-------------
+      if (primitive.indices >= 0) {
+        const auto &indAcc = model.accessors[primitive.indices];
+        const auto &indView = model.bufferViews[indAcc.bufferView];
+        const auto &indBuf = model.buffers[indView.buffer];
+        const void *indData =
+            &indBuf.data[indView.byteOffset + indAcc.byteOffset];
+        for (size_t i = 0; i < indAcc.count; ++i) {
+          uint32_t idx = 0;
+          if (indAcc.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT) {
+            idx = static_cast<const uint32_t *>(indData)[i];
+          } else if (indAcc.componentType ==
+                     TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT) {
+            idx = static_cast<const uint16_t *>(indData)[i];
+          } else if (indAcc.componentType ==
+                     TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE) {
+            idx = static_cast<const uint8_t *>(indData)[i];
+          }
+          indices.push_back(vertexBase + idx); // Offset
+        }
+      } else {
+        for (size_t i = 0; i < posAcc.count; ++i) {
+          indices.push_back(vertexBase + static_cast<uint32_t>(i));
+        }
+      }
+
+      uint32_t indexCount = static_cast<uint32_t>(indices.size()) - indexStart;
+
+      //-------Saving mesh----------
+      meshes.push_back(Mesh{indexStart, indexCount, texIdx});
+
+      std::cout << "Mesh: " << indexCount << " indices, texture " << texIdx
+                << std::endl;
     }
-    vert.color = glm::vec3(1.0f);
-    vertices.push_back(vert);
   }
 
-  // Получаем индексы
-  const tinygltf::Accessor &indAccessor = model.accessors[primitive.indices];
-  const tinygltf::BufferView &indView =
-      model.bufferViews[indAccessor.bufferView];
-  const tinygltf::Buffer &indBuffer = model.buffers[indView.buffer];
-  const void *indData =
-      &indBuffer.data[indView.byteOffset + indAccessor.byteOffset];
-
-  // Индексы могут быть в разных форматах (uint8, uint16, uint32)
-  for (size_t i = 0; i < indAccessor.count; ++i) {
-    if (indAccessor.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT) {
-      indices.push_back(static_cast<const uint32_t *>(indData)[i]);
-    } else if (indAccessor.componentType ==
-               TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT) {
-      indices.push_back(static_cast<const uint16_t *>(indData)[i]);
-    } else if (indAccessor.componentType ==
-               TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE) {
-      indices.push_back(static_cast<const uint8_t *>(indData)[i]);
-    }
-  }
-
-  // ----------Load texture------------
-  if (!model.images.empty()) {
-    const tinygltf::Image &img = model.images[0];
-
-    // Декодируем PNG/JPG байты через stb_image
-    // int w, h, ch;
-    // stbi_uc *pixels = stbi_load_from_memory(
-    //     img.image.data(), static_cast<int>(img.image.size()), &w, &h, &ch,
-    //     STBI_rgb_alpha);
-
-    // if (!pixels) {
-    //   throw std::runtime_error("Failed to decode texture from glTF");
-    // }
-
-    loadedTexWidth = img.width;
-    loadedTexHeight = img.height;
-    loadedPixels = img.image;
-    // stbi_image_free(pixels);
-
-    std::cout << "Texture loaded: " << img.width << "x" << img.height << ", "
-              << loadedPixels.size() << "bytes" << std::endl;
-  } else {
-    std::cout << "No texture in glTF, using white 1x1" << std::endl;
-    loadedTexWidth = 1;
-    loadedTexHeight = 1;
-    loadedPixels = {255, 255, 255, 255};
-  }
-
+  std::cout << "Total: " << vertices.size() << " vertices, " << indices.size()
+            << " indices, " << meshes.size() << " meshes, "
+            << loadedTextures.size() << " textures" << std::endl;
   return true;
+}
+
+void HelloTriangleApplication::createTextures() {
+  textures.resize(loadedTextures.size());
+
+  VkPhysicalDeviceProperties props;
+  vkGetPhysicalDeviceProperties(physicalDevice, &props);
+
+  for (size_t i = 0; i < loadedTextures.size(); ++i) {
+    const auto &data = loadedTextures[i];
+    Texture &tex = textures[i];
+    tex.width = data.width;
+    tex.height = data.height;
+    tex.mipLevels = static_cast<uint32_t>(std::floor(
+                        std::log2(std::max(data.width, data.height)))) +
+                    1;
+
+    // ─── Staging buffer ───
+    VkDeviceSize imageSize = data.pixels.size();
+    VkBuffer stagingBuffer;
+    VkDeviceMemory stagingMemory;
+    createBuffer(imageSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                     VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                 stagingBuffer, stagingMemory);
+
+    void *ptr;
+    vkMapMemory(device, stagingMemory, 0, imageSize, 0, &ptr);
+    memcpy(ptr, data.pixels.data(), imageSize);
+    vkUnmapMemory(device, stagingMemory);
+
+    // ─── VkImage ───
+    createImage(data.width, data.height, tex.mipLevels, VK_SAMPLE_COUNT_1_BIT,
+                VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_TILING_OPTIMAL,
+                VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                    VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                    VK_IMAGE_USAGE_SAMPLED_BIT,
+                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, tex.image, tex.memory);
+
+    transitionImageLayout(tex.image, VK_FORMAT_R8G8B8A8_SRGB,
+                          VK_IMAGE_LAYOUT_UNDEFINED,
+                          VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, tex.mipLevels);
+    copyBufferToImage(stagingBuffer, tex.image, data.width, data.height);
+    generateMipmaps(tex.image, VK_FORMAT_R8G8B8A8_SRGB, data.width, data.height,
+                    tex.mipLevels);
+
+    vkDestroyBuffer(device, stagingBuffer, nullptr);
+    vkFreeMemory(device, stagingMemory, nullptr);
+
+    // ─── ImageView ───
+    tex.view = createImageView(tex.image, VK_FORMAT_R8G8B8A8_SRGB,
+                               VK_IMAGE_ASPECT_COLOR_BIT, tex.mipLevels);
+
+    // ─── Sampler ───
+    VkSamplerCreateInfo si{};
+    si.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    si.magFilter = VK_FILTER_LINEAR;
+    si.minFilter = VK_FILTER_LINEAR;
+    si.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    si.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    si.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    si.anisotropyEnable = VK_TRUE;
+    si.maxAnisotropy = props.limits.maxSamplerAnisotropy;
+    si.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
+    si.unnormalizedCoordinates = VK_FALSE;
+    si.compareOp = VK_COMPARE_OP_ALWAYS;
+    si.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+    si.minLod = 0.0f;
+    si.maxLod = VK_LOD_CLAMP_NONE;
+    if (vkCreateSampler(device, &si, nullptr, &tex.sampler) != VK_SUCCESS) {
+      throw std::runtime_error("failed to create sampler for texture " +
+                               std::to_string(i));
+    }
+
+    std::cout << "Texture " << i << ": " << data.width << "x" << data.height
+              << ", mips=" << tex.mipLevels << std::endl;
+  }
 }
 
 void HelloTriangleApplication::createVertexBuffer() {
@@ -1094,62 +1208,6 @@ VkSampleCountFlagBits HelloTriangleApplication::getMaxUsableSampleCount() {
     return VK_SAMPLE_COUNT_2_BIT;
   }
   return VK_SAMPLE_COUNT_1_BIT;
-}
-
-void HelloTriangleApplication::createTextureImage() {
-  // int texWidth, texHeight, texChannels;
-  // stbi_uc *pixels = stbi_load(TEXTURE_PATH.c_str(), &texWidth, &texHeight,
-  //                             &texChannels, STBI_rgb_alpha);
-  // VkDeviceSize imageSize = texWidth * texHeight * 4;
-
-  // if (!pixels) {
-  //   throw std::runtime_error("failed to load texture!");
-  // }
-
-  if (loadedPixels.empty()) {
-    throw std::runtime_error("No texture pixels loaded!");
-  }
-
-  int texWidth = loadedTexWidth;
-  int texHeight = loadedTexHeight;
-  VkDeviceSize imageSize = static_cast<VkDeviceSize>(loadedPixels.size());
-
-  mipLevels = static_cast<uint32_t>(
-                  std::floor(std::log2(std::max(texWidth, texHeight)))) +
-              1;
-
-  VkBuffer stagingBuffer;
-  VkDeviceMemory stagingBufferMemory;
-  createBuffer(imageSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-               VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                   VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-               stagingBuffer, stagingBufferMemory);
-  void *data;
-  vkMapMemory(device, stagingBufferMemory, 0, imageSize, 0, &data);
-  memcpy(data, loadedPixels.data(), static_cast<size_t>(imageSize));
-  vkUnmapMemory(device, stagingBufferMemory);
-
-
-  createImage(texWidth, texHeight, mipLevels, VK_SAMPLE_COUNT_1_BIT,
-              VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_TILING_OPTIMAL,
-              VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
-                  VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-              VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, textureImage,
-              textureImageMemory);
-
-  transitionImageLayout(textureImage, VK_FORMAT_R8G8B8A8_SRGB,
-                        VK_IMAGE_LAYOUT_UNDEFINED,
-                        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, mipLevels);
-  copyBufferToImage(stagingBuffer, textureImage,
-                    static_cast<uint32_t>(texWidth),
-                    static_cast<uint32_t>(texHeight));
-  // Transitioned to VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL while generating
-  // mipmaps
-  generateMipmaps(textureImage, VK_FORMAT_R8G8B8A8_SRGB, texWidth, texHeight,
-                  mipLevels);
-
-  vkDestroyBuffer(device, stagingBuffer, nullptr);
-  vkFreeMemory(device, stagingBufferMemory, nullptr);
 }
 
 void HelloTriangleApplication::generateMipmaps(VkImage image,
@@ -1235,36 +1293,6 @@ void HelloTriangleApplication::generateMipmaps(VkImage image,
                        nullptr, 1, &barrier);
 
   endSingleTimeCommands(commandBuffer);
-}
-
-void HelloTriangleApplication::createTextureImageView() {
-  textureImageView = createImageView(textureImage, VK_FORMAT_R8G8B8A8_SRGB,
-                                     VK_IMAGE_ASPECT_COLOR_BIT, mipLevels);
-}
-
-void HelloTriangleApplication::createTextureSampler() {
-  VkPhysicalDeviceProperties properties{};
-  vkGetPhysicalDeviceProperties(physicalDevice, &properties);
-  VkSamplerCreateInfo samplerInfo{};
-  samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-  samplerInfo.magFilter = VK_FILTER_LINEAR;
-  samplerInfo.minFilter = VK_FILTER_LINEAR;
-  samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-  samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-  samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-  samplerInfo.anisotropyEnable = VK_TRUE;
-  samplerInfo.maxAnisotropy = properties.limits.maxSamplerAnisotropy;
-  samplerInfo.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
-  samplerInfo.unnormalizedCoordinates = VK_FALSE;
-  samplerInfo.compareOp = VK_COMPARE_OP_ALWAYS;
-  samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
-  samplerInfo.mipLodBias = 0.0f;
-  samplerInfo.minLod = 0.0f;
-  samplerInfo.maxLod = VK_LOD_CLAMP_NONE;
-  if (vkCreateSampler(device, &samplerInfo, nullptr, &textureSampler) !=
-      VK_SUCCESS) {
-    throw std::runtime_error("failed to create texture sampler!");
-  }
 }
 
 VkImageView
@@ -1445,18 +1473,22 @@ void HelloTriangleApplication::createUniformBuffers() {
 }
 
 void HelloTriangleApplication::createDescriptorPool() {
+  uint32_t numTextures = static_cast<uint32_t>(textures.size());
+  if (numTextures == 0)
+    numTextures = 1;
+
   std::array<VkDescriptorPoolSize, 2> poolSizes{};
 
   poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-  poolSizes[0].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
+  poolSizes[0].descriptorCount = MAX_FRAMES_IN_FLIGHT * numTextures;
   poolSizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-  poolSizes[1].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
+  poolSizes[1].descriptorCount = MAX_FRAMES_IN_FLIGHT * numTextures;
 
   VkDescriptorPoolCreateInfo poolInfo{};
   poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
   poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
   poolInfo.pPoolSizes = poolSizes.data();
-  poolInfo.maxSets = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
+  poolInfo.maxSets = MAX_FRAMES_IN_FLIGHT * numTextures;
 
   if (vkCreateDescriptorPool(device, &poolInfo, nullptr, &descriptorPool) !=
       VK_SUCCESS) {
@@ -1465,53 +1497,60 @@ void HelloTriangleApplication::createDescriptorPool() {
 }
 
 void HelloTriangleApplication::createDescriptorSets() {
-  std::vector<VkDescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT,
-                                             descriptorSetLayout);
-  VkDescriptorSetAllocateInfo allocInfo{};
-  allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-  allocInfo.descriptorPool = descriptorPool;
-  allocInfo.descriptorSetCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
-  allocInfo.pSetLayouts = layouts.data();
-
+  uint32_t numTextures = static_cast<uint32_t>(textures.size());
   descriptorSets.resize(MAX_FRAMES_IN_FLIGHT);
-  if (vkAllocateDescriptorSets(device, &allocInfo, descriptorSets.data()) !=
-      VK_SUCCESS) {
-    throw std::runtime_error("failed to allocate descriptor sets!");
-  }
 
-  for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-    VkDescriptorBufferInfo bufferInfo{};
-    bufferInfo.buffer = uniformBuffers[i];
-    bufferInfo.offset = 0;
-    bufferInfo.range = sizeof(UniformBufferObject);
+  for (auto &vec : descriptorSets)
+    vec.resize(numTextures);
 
-    VkDescriptorImageInfo imageInfo{};
-    imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    imageInfo.imageView = textureImageView;
-    imageInfo.sampler = textureSampler;
+  for (uint32_t frame = 0; frame < MAX_FRAMES_IN_FLIGHT; ++frame) {
 
-    std::array<VkWriteDescriptorSet, 2> descriptorWrites{};
+    // Creating layouts for every set
+    std::vector<VkDescriptorSetLayout> layouts(numTextures,
+                                               descriptorSetLayout);
+    VkDescriptorSetAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    allocInfo.descriptorPool = descriptorPool;
+    allocInfo.descriptorSetCount = numTextures;
+    allocInfo.pSetLayouts = layouts.data();
 
-    descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    descriptorWrites[0].dstSet = descriptorSets[i];
-    descriptorWrites[0].dstBinding = 0;
-    descriptorWrites[0].dstArrayElement = 0;
-    descriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    descriptorWrites[0].descriptorCount = 1;
-    descriptorWrites[0].pBufferInfo = &bufferInfo;
+    if (vkAllocateDescriptorSets(device, &allocInfo,
+                                 descriptorSets[frame].data()) != VK_SUCCESS) {
+      throw std::runtime_error("failed to allocate descriptor sets!");
+    }
 
-    descriptorWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    descriptorWrites[1].dstSet = descriptorSets[i];
-    descriptorWrites[1].dstBinding = 1;
-    descriptorWrites[1].dstArrayElement = 0;
-    descriptorWrites[1].descriptorType =
-        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    descriptorWrites[1].descriptorCount = 1;
-    descriptorWrites[1].pImageInfo = &imageInfo;
+    for (size_t tex = 0; tex < numTextures; ++tex) {
+      VkDescriptorBufferInfo bufferInfo{};
+      bufferInfo.buffer = uniformBuffers[frame];
+      bufferInfo.offset = 0;
+      bufferInfo.range = sizeof(UniformBufferObject);
 
-    vkUpdateDescriptorSets(device,
-                           static_cast<uint32_t>(descriptorWrites.size()),
-                           descriptorWrites.data(), 0, nullptr);
+      VkDescriptorImageInfo imageInfo{};
+      imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+      imageInfo.imageView = textures[tex].view;
+      imageInfo.sampler = textures[tex].sampler;
+
+      std::array<VkWriteDescriptorSet, 2> descriptorWrites{};
+
+      descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+      descriptorWrites[0].dstSet = descriptorSets[frame][tex];
+      descriptorWrites[0].dstBinding = 0;
+      descriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+      descriptorWrites[0].descriptorCount = 1;
+      descriptorWrites[0].pBufferInfo = &bufferInfo;
+
+      descriptorWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+      descriptorWrites[1].dstSet = descriptorSets[frame][tex];
+      descriptorWrites[1].dstBinding = 1;
+      descriptorWrites[1].descriptorType =
+          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+      descriptorWrites[1].descriptorCount = 1;
+      descriptorWrites[1].pImageInfo = &imageInfo;
+
+      vkUpdateDescriptorSets(device,
+                             static_cast<uint32_t>(descriptorWrites.size()),
+                             descriptorWrites.data(), 0, nullptr);
+    }
   }
 }
 
@@ -1672,12 +1711,16 @@ void HelloTriangleApplication::recordCommandBuffer(
 
   vkCmdBindIndexBuffer(commandBuffer, indexBuffer, 0, VK_INDEX_TYPE_UINT32);
 
-  vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                          pipelineLayout, 0, 1, &descriptorSets[currentFrame],
-                          0, nullptr);
+  for (const auto &mesh : meshes) {
+    if (mesh.textureIndex < 0 ||
+        mesh.textureIndex >= static_cast<int>(textures.size()))
+      continue;
+    VkDescriptorSet sets[] = {descriptorSets[currentFrame][mesh.textureIndex]};
+    vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                            pipelineLayout, 0, 1, sets, 0, nullptr);
 
-  vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(indices.size()), 1, 0,
-                   0, 0);
+    vkCmdDrawIndexed(commandBuffer, mesh.indexCount, 1, mesh.indexOffset, 0, 0);
+  }
 
   vkCmdEndRenderPass(commandBuffer);
 

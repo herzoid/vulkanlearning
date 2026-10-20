@@ -2,7 +2,7 @@
 
 #include "vertex.hpp"
 #include <sys/types.h>
-
+#include <vulkan/vulkan_core.h>
 
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
@@ -17,11 +17,11 @@
 #include <vector>
 #include <vulkan/vulkan.h>
 
-
 /// @brief Главный класс Vulkan-приложения.
 ///
 /// Управляет жизненным циклом: инициализация Vulkan, главный цикл рендеринга,
-/// очистка ресурсов. Поддерживает загрузку моделей в формате .glb (бинарный glTF).
+/// очистка ресурсов. Поддерживает загрузку моделей в формате .glb (бинарный
+/// glTF).
 class HelloTriangleApplication {
 public:
   HelloTriangleApplication(std::string modelPath)
@@ -43,6 +43,31 @@ private:
     VkSurfaceCapabilitiesKHR capabilities;
     std::vector<VkSurfaceFormatKHR> formats;
     std::vector<VkPresentModeKHR> presentModes;
+  };
+
+  /// @brief Loaded texture info.
+  struct Texture {
+    VkImage image = VK_NULL_HANDLE;
+    VkDeviceMemory memory = VK_NULL_HANDLE;
+    VkImageView view = VK_NULL_HANDLE;
+    VkSampler sampler = VK_NULL_HANDLE;
+    uint32_t mipLevels = 1;
+    int width = 0;
+    int height = 0;
+  };
+
+  /// @brief Pixel data? loaded from glTF, before GPU object creation
+  struct TextureData {
+    std::vector<unsigned char> pixels;
+    int width = 0;
+    int height = 0;
+  };
+
+  /// @brief Mesh for render
+  struct Mesh {
+    uint32_t indexOffset = 0;
+    uint32_t indexCount = 0;
+    int32_t textureIndex = -1;
   };
 
   std::string modelPath;
@@ -84,24 +109,9 @@ private:
   VkDeviceMemory depthImageMemory;
   VkImageView depthImageView;
 
-  uint32_t mipLevels;
-  VkImage textureImage;
-  VkDeviceMemory textureImageMemory;
-  VkImageView textureImageView;
-  VkSampler textureSampler;
-
-  std::vector<unsigned char> loadedPixels;
-  int loadedTexWidth = 0;
-  int loadedTexHeight = 0;
-
-  struct TextureData{
-    std::vector<u_char> pixels;
-    int width = 0;
-    int height = 0;
-    int imageIndex = -1;
-  };
-
-  std::vector<TextureData> loadedTextures;
+  std::vector<TextureData> loadedTextures; ///< Texture's pixels, before GPU.
+  std::vector<Texture> textures;           ///< GPU textures.
+  std::vector<Mesh> meshes;                ///< Meshes for render
 
   std::vector<Vertex> vertices;
 
@@ -119,7 +129,7 @@ private:
   std::vector<void *> uniformBuffersMapped;
 
   VkDescriptorPool descriptorPool;
-  std::vector<VkDescriptorSet> descriptorSets;
+  std::vector<std::vector<VkDescriptorSet>> descriptorSets;
 
   std::vector<VkCommandBuffer> commandBuffers;
 
@@ -204,21 +214,22 @@ private:
 
   void loadModel();
 
-  bool loadGltfModel(const std::string &filename, std::vector<Vertex> &vertices,
-                     std::vector<uint32_t> &indices);
+  bool loadGltfModel(const std::string &filename);
 
   void createVertexBuffer();
 
   VkSampleCountFlagBits getMaxUsableSampleCount();
 
-  void createTextureImage();
+  // void createTextureImage();
+
+  void createTextures();
 
   void generateMipmaps(VkImage image, VkFormat imageFormat, int32_t texWidth,
                        int32_t texHeight, uint32_t mipLevels);
 
-  void createTextureImageView();
+  // void createTextureImageView();
 
-  void createTextureSampler();
+  // void createTextureSampler();
 
   VkImageView createImageView(VkImage image, VkFormat format,
                               VkImageAspectFlags aspectFlags,
