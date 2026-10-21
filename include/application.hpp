@@ -1,14 +1,16 @@
 #pragma once
 
-#include "vertex.hpp"
+// #define GLFW_INCLUDE_VULKAN
+
+#include "camera.hpp"
+#include "model.hpp"
 #include <sys/types.h>
 #include <vulkan/vulkan_core.h>
 
-#define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 
-#define GLM_FORCE_RADIANS
-#define GLM_FORCE_DEPTH_ZERO_TO_ONE
+// #define GLM_FORCE_RADIANS
+// #define GLM_FORCE_DEPTH_ZERO_TO_ONE
 #include <glm/glm.hpp>
 
 #include <cstdint>
@@ -56,19 +58,7 @@ private:
     int height = 0;
   };
 
-  /// @brief Pixel data? loaded from glTF, before GPU object creation
-  struct TextureData {
-    std::vector<unsigned char> pixels;
-    int width = 0;
-    int height = 0;
-  };
-
-  /// @brief Mesh for render
-  struct Mesh {
-    uint32_t indexOffset = 0;
-    uint32_t indexCount = 0;
-    int32_t textureIndex = -1;
-  };
+  Camera camera;
 
   std::string modelPath;
   uint32_t windowWidth = 800;
@@ -109,15 +99,9 @@ private:
   VkDeviceMemory depthImageMemory;
   VkImageView depthImageView;
 
-  std::vector<TextureData> loadedTextures; ///< Texture's pixels, before GPU.
-  std::vector<Texture> textures;           ///< GPU textures.
-  std::vector<Mesh> meshes;                ///< Meshes for render
+  std::vector<Texture> textures; ///< GPU textures.
 
-  std::vector<Vertex> vertices;
-
-  // Вектор, из которого GPU узнаёт в каком порядке соединять вершины в
-  // треугольники
-  std::vector<uint32_t> indices;
+  LoadedModel model;
 
   VkBuffer vertexBuffer;
   VkDeviceMemory vertexBufferMemory;
@@ -139,20 +123,6 @@ private:
   uint32_t currentFrame = 0;
 
   bool framebufferResized = false;
-
-  // Камера
-  glm::vec3 cameraPos = glm::vec3(5.0f, 5.0f, 5.0f);
-  glm::vec3 cameraFront = glm::vec3(0.0f, 0.0f, -1.0f);
-  glm::vec3 cameraUp = glm::vec3(0.0f, 1.0f, 0.0f);
-
-  float yaw = 0.0f;   // Поворот по горизонтали
-  float pitch = 0.0f; // Поворот по вертикали
-  float lastX = windowWidth / 2.0f;
-  float lastY = windowHeight / 2.0f;
-  bool firstMouse = true;
-
-  float cameraSpeed = 10.5f;
-  float mouseSensitivity = 0.1f;
 
   bool isFullscreen = false;
   int windowedX = 0, windowedY = 0;
@@ -211,10 +181,6 @@ private:
   VkFormat findDepthFormat();
 
   bool hasStencilComponent(VkFormat format);
-
-  void loadModel();
-
-  bool loadGltfModel(const std::string &filename);
 
   void createVertexBuffer();
 
@@ -305,7 +271,7 @@ private:
                 const VkDebugUtilsMessengerCallbackDataEXT *pCallbackData,
                 void *pUserData);
 
-  void processInput(float deltaTime);
+  // void processInput(float deltaTime);
 
   static void mouseCallback(GLFWwindow *window, double xpos, double ypos);
 };

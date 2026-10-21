@@ -3,35 +3,13 @@
 // ─── Стандартная библиотека ───
 #include <array>
 #include <chrono>
-#include <cmath>
 #include <cstring>
 #include <fstream>
 #include <iostream>
-#include <limits>
 #include <set>
 #include <stdexcept>
-#include <utility>
-#include <vector>
-
-// #include <vulkan/vulkan_core.h>
-
-#include <glm/ext/vector_float2.hpp>
-
-// ─── Сторонние библиотеки ───
-#include <glm/gtc/matrix_transform.hpp>
-#define GLM_ENABLE_EXPERIMENTAL
-#include <glm/gtx/hash.hpp>
 
 #include "UBO.hpp"
-
-// ─── Макросы + библиотеки ───
-#define STB_IMAGE_IMPLEMENTATION
-#include <external/stb_image.h>
-
-#define TINYGLTF_IMPLEMENTATION
-#define TINYGLTF_NO_STB_IMAGE
-#define TINYGLTF_NO_STB_IMAGE_WRITE
-#include <tinygltf/tiny_gltf.h>
 
 namespace {
 
@@ -151,7 +129,7 @@ void HelloTriangleApplication::initVulkan() {
   createColorResources();
   createDepthResources();
   createFramebuffers();
-  loadGltfModel(modelPath);
+  model = loadGltfModel(modelPath);
   createTextures();
   createVertexBuffer();
   createIndexBuffer();
@@ -172,9 +150,9 @@ void HelloTriangleApplication::mainLoop() {
 
     glfwPollEvents();
 
-    // if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS) {
-    //   glfwSetWindowShouldClose(window, GLFW_TRUE);
-    // }
+    if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS) {
+      glfwSetWindowShouldClose(window, GLFW_TRUE);
+    }
 
     bool currentF11 = (glfwGetKey(window, GLFW_KEY_F11) == GLFW_PRESS);
     if (currentF11 && !f11Pressed) {
@@ -182,7 +160,7 @@ void HelloTriangleApplication::mainLoop() {
     }
     f11Pressed = currentF11;
 
-    processInput(deltaTime);
+    camera.processInput(window, deltaTime);
     drawFrame();
   }
 
@@ -237,12 +215,6 @@ void HelloTriangleApplication::cleanup() {
 
   vkDestroyBuffer(device, vertexBuffer, nullptr);
   vkFreeMemory(device, vertexBufferMemory, nullptr);
-
-  // for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-  //   vkDestroySemaphore(device, renderFinishedSemaphores[i], nullptr);
-  //   vkDestroySemaphore(device, imageAvailableSemaphores[i], nullptr);
-  //   vkDestroyFence(device, inFlightFences[i], nullptr);
-  // }
 
   for (size_t i = 0; i < swapChainImages.size(); i++) {
     vkDestroySemaphore(device, renderFinishedSemaphores[i], nullptr);
@@ -879,215 +851,14 @@ bool HelloTriangleApplication::hasStencilComponent(VkFormat format) {
 //   }
 // }
 
-bool HelloTriangleApplication::loadGltfModel(const std::string &filename) {
-  tinygltf::Model model;
-  tinygltf::TinyGLTF loader;
-  std::string err, warn;
-
-  // ---------Callback for images decoding------------
-  loader.SetImageLoader(
-      [](tinygltf::Image *image, const int image_idx, std::string *err,
-         std::string *warn, int req_width, int req_height,
-         const unsigned char *bytes, int size, void *user_data) -> bool {
-        int w, h, ch;
-        stbi_uc *pixels =
-            stbi_load_from_memory(bytes, size, &w, &h, &ch, STBI_rgb_alpha);
-
-        if (!pixels) {
-          if (err)
-            *err += " stbi_load_from_memory failed";
-          return false;
-        }
-
-        image->width = w;
-        image->height = h;
-        image->component = 4;
-        image->bits = 8;
-        image->pixel_type = TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE;
-        image->image.assign(pixels, pixels + (w * h * 4));
-
-        stbi_image_free(pixels);
-        return true;
-      },
-      nullptr // user_data
-  );
-
-  // ----------Checking for magic header--------------
-  std::ifstream file(filename, std::ios::binary);
-  if (!file.is_open()) {
-    throw std::runtime_error("Failed to open file: " + filename);
-  }
-
-  char magic[4] = {0};
-  file.read(magic, 4);
-  file.close();
-
-  if (magic[0] != 'g' || magic[1] != 'l' || magic[2] != 'T' ||
-      magic[3] != 'F') {
-    throw std::runtime_error(
-        "Model format not supported. Only binary glTF (.glb) is allowed.\n");
-  }
-
-  // ----------Loading model---------------
-  bool ret = false;
-  ret = loader.LoadBinaryFromFile(&model, &err, &warn, filename);
-
-  if (!warn.empty()) {
-    std::cout << "TinyGLTF warning: " << warn << std::endl;
-  }
-
-  if (!err.empty()) {
-    std::cerr << "TinyGLTF error: " << err << std::endl;
-  }
-
-  if (!ret) {
-    std::cerr << "Failed to load glTF file: " << filename << std::endl;
-    return false;
-  }
-
-  std::cout << "Meshes: " << model.meshes.size()
-            << "\nImages: " << model.images.size()
-            << "\nMaterials: " << model.materials.size()
-            << "\nTextures: " << model.textures.size() << std::endl;
-
-  // ----------Cleaning old data---------------
-  vertices.clear();
-  indices.clear();
-  meshes.clear();
-  loadedTextures.clear();
-
-  //-----------Loading all textures (only pixels)-----------
-  for (const auto &img : model.images) {
-    TextureData tex;
-    tex.width = img.width;
-    tex.height = img.height;
-    tex.pixels = img.image;
-    loadedTextures.push_back(std::move(tex));
-  }
-
-  //-----------Fallback texture--------------
-  if (loadedTextures.empty()) {
-    std::cout << "No textures in model, adding white fallback color"
-              << std::endl;
-    TextureData fallback;
-    fallback.width = 1;
-    fallback.height = 1;
-    fallback.pixels = {255, 255, 255, 255};
-    loadedTextures.push_back(std::move(fallback));
-  }
-
-  //--------Find all meshes and primitives-----------
-  for (const auto &mesh : model.meshes) {
-    for (const auto &primitive : mesh.primitives) {
-      if (primitive.mode != TINYGLTF_MODE_TRIANGLES)
-        continue;
-      // Define the texture for the primitive
-      int32_t texIdx = -1;
-      if (primitive.material >= 0) {
-        const auto &mat = model.materials[primitive.material];
-        int texInfoIdx = mat.pbrMetallicRoughness.baseColorTexture.index;
-        if (texInfoIdx >= 0 && texInfoIdx < (int)model.images.size()) {
-          int imgIdx = model.textures[texInfoIdx].source;
-          if (imgIdx >= 0 && imgIdx < (int)model.images.size()) {
-            texIdx = imgIdx;
-          }
-        }
-      }
-      // If no texture - use fallback texture
-      if (texIdx < 0) {
-        texIdx = static_cast<int>(loadedTextures.size()) - 1;
-      }
-
-      // Vertices positions
-      auto posIt = primitive.attributes.find("POSITION");
-      if (posIt == primitive.attributes.end())
-        continue;
-
-      const auto &posAcc = model.accessors[posIt->second];
-      const auto &posView = model.bufferViews[posAcc.bufferView];
-      const auto &posBuf = model.buffers[posView.buffer];
-      const float *positions = reinterpret_cast<const float *>(
-          &posBuf.data[posView.byteOffset + posAcc.byteOffset]);
-
-      //------Texture coordinates----------
-      const float *texCoords = nullptr;
-      auto texIt = primitive.attributes.find("TEXCOORD_0");
-      if (texIt != primitive.attributes.end()) {
-        const auto &texAcc = model.accessors[texIt->second];
-        const auto &texView = model.bufferViews[texAcc.bufferView];
-        const auto &texBuf = model.buffers[texView.buffer];
-        texCoords = reinterpret_cast<const float *>(
-            &texBuf.data[texView.byteOffset + texAcc.byteOffset]);
-      }
-
-      // The begining of the primitive's vertices
-      uint32_t vertexBase = static_cast<uint32_t>(vertices.size());
-
-      //---------Filling the vertices-----------------
-      for (size_t i = 0; i < posAcc.count; ++i) {
-        Vertex v{};
-        v.pos = {positions[i * 3 + 0], positions[i * 3 + 1],
-                 positions[i * 3 + 2]};
-        v.texCoord = texCoords ? glm::vec2(texCoords[i * 2 + 0],
-                                           texCoords[i * 2 + 1])
-                               : glm::vec2(0.0f);
-        v.color = glm::vec3(1.0f);
-        vertices.push_back(v);
-      }
-
-      // The beginning of the indices
-      uint32_t indexStart = static_cast<uint32_t>(indices.size());
-
-      //---------Filling the indices-------------
-      if (primitive.indices >= 0) {
-        const auto &indAcc = model.accessors[primitive.indices];
-        const auto &indView = model.bufferViews[indAcc.bufferView];
-        const auto &indBuf = model.buffers[indView.buffer];
-        const void *indData =
-            &indBuf.data[indView.byteOffset + indAcc.byteOffset];
-        for (size_t i = 0; i < indAcc.count; ++i) {
-          uint32_t idx = 0;
-          if (indAcc.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT) {
-            idx = static_cast<const uint32_t *>(indData)[i];
-          } else if (indAcc.componentType ==
-                     TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT) {
-            idx = static_cast<const uint16_t *>(indData)[i];
-          } else if (indAcc.componentType ==
-                     TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE) {
-            idx = static_cast<const uint8_t *>(indData)[i];
-          }
-          indices.push_back(vertexBase + idx); // Offset
-        }
-      } else {
-        for (size_t i = 0; i < posAcc.count; ++i) {
-          indices.push_back(vertexBase + static_cast<uint32_t>(i));
-        }
-      }
-
-      uint32_t indexCount = static_cast<uint32_t>(indices.size()) - indexStart;
-
-      //-------Saving mesh----------
-      meshes.push_back(Mesh{indexStart, indexCount, texIdx});
-
-      std::cout << "Mesh: " << indexCount << " indices, texture " << texIdx
-                << std::endl;
-    }
-  }
-
-  std::cout << "Total: " << vertices.size() << " vertices, " << indices.size()
-            << " indices, " << meshes.size() << " meshes, "
-            << loadedTextures.size() << " textures" << std::endl;
-  return true;
-}
-
 void HelloTriangleApplication::createTextures() {
-  textures.resize(loadedTextures.size());
+  textures.resize(model.textures.size());
 
   VkPhysicalDeviceProperties props;
   vkGetPhysicalDeviceProperties(physicalDevice, &props);
 
-  for (size_t i = 0; i < loadedTextures.size(); ++i) {
-    const auto &data = loadedTextures[i];
+  for (size_t i = 0; i < model.textures.size(); ++i) {
+    const auto &data = model.textures[i];
     Texture &tex = textures[i];
     tex.width = data.width;
     tex.height = data.height;
@@ -1158,7 +929,7 @@ void HelloTriangleApplication::createTextures() {
 }
 
 void HelloTriangleApplication::createVertexBuffer() {
-  VkDeviceSize bufferSize = sizeof(vertices[0]) * vertices.size();
+  VkDeviceSize bufferSize = sizeof(Vertex) * model.vertices.size();
 
   VkBuffer stagingBuffer;
   VkDeviceMemory stagingBufferMemory;
@@ -1169,7 +940,7 @@ void HelloTriangleApplication::createVertexBuffer() {
 
   void *data;
   vkMapMemory(device, stagingBufferMemory, 0, bufferSize, 0, &data);
-  memcpy(data, vertices.data(), (size_t)bufferSize);
+  memcpy(data, model.vertices.data(), (size_t)bufferSize);
   vkUnmapMemory(device, stagingBufferMemory);
 
   createBuffer(
@@ -1429,7 +1200,7 @@ void HelloTriangleApplication::copyBufferToImage(VkBuffer buffer, VkImage image,
 }
 
 void HelloTriangleApplication::createIndexBuffer() {
-  VkDeviceSize bufferSize = sizeof(indices[0]) * indices.size();
+  VkDeviceSize bufferSize = sizeof(uint32_t) * model.indices.size();
 
   VkBuffer stagingBuffer;
   VkDeviceMemory stagingBufferMemory;
@@ -1440,7 +1211,7 @@ void HelloTriangleApplication::createIndexBuffer() {
 
   void *data;
   vkMapMemory(device, stagingBufferMemory, 0, bufferSize, 0, &data);
-  memcpy(data, indices.data(), (size_t)bufferSize);
+  memcpy(data, model.indices.data(), (size_t)bufferSize);
   vkUnmapMemory(device, stagingBufferMemory);
 
   createBuffer(
@@ -1711,7 +1482,7 @@ void HelloTriangleApplication::recordCommandBuffer(
 
   vkCmdBindIndexBuffer(commandBuffer, indexBuffer, 0, VK_INDEX_TYPE_UINT32);
 
-  for (const auto &mesh : meshes) {
+  for (const auto &mesh : model.meshes) {
     if (mesh.textureIndex < 0 ||
         mesh.textureIndex >= static_cast<int>(textures.size()))
       continue;
@@ -1796,12 +1567,10 @@ void HelloTriangleApplication::updateUniformBuffer(uint32_t currentImage) {
   //     0.0f),
   //                 glm::vec3(0.0f, 1.0f, 0.0f));
 
-  ubo.view = glm::lookAt(cameraPos, cameraPos + cameraFront, cameraUp);
+  ubo.view = camera.getViewMatrix();
 
-  ubo.proj = glm::perspective(
-      glm::radians(45.0f),
-      swapChainExtent.width / (float)swapChainExtent.height, 0.1f, 100.0f);
-  ubo.proj[1][1] *= -1;
+  ubo.proj = camera.getProjectionMatrix(swapChainExtent.width /
+                                        (float)swapChainExtent.height);
 
   memcpy(uniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
 }
@@ -2108,69 +1877,9 @@ VKAPI_ATTR VkBool32 VKAPI_CALL HelloTriangleApplication::debugCallback(
   return VK_FALSE;
 }
 
-void HelloTriangleApplication::processInput(float deltaTime) {
-  // Движение камеры (WASD)
-  float speed = cameraSpeed * deltaTime;
-
-  if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) {
-    cameraPos += cameraFront * speed;
-  }
-  if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) {
-    cameraPos -= cameraFront * speed;
-  }
-  if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) {
-    cameraPos -= glm::normalize(glm::cross(cameraFront, cameraUp)) * speed;
-  }
-  if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) {
-    cameraPos += glm::normalize(glm::cross(cameraFront, cameraUp)) * speed;
-  }
-
-  // Движение вверх/вниз (Q и E)
-  if (glfwGetKey(window, GLFW_KEY_C) == GLFW_PRESS) {
-    cameraPos -= cameraUp * speed;
-  }
-  if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS) {
-    cameraPos += cameraUp * speed;
-  }
-
-  // Exit
-  if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS) {
-    glfwSetWindowShouldClose(window, GLFW_TRUE);
-  }
-}
-
 void HelloTriangleApplication::mouseCallback(GLFWwindow *window, double xpos,
                                              double ypos) {
   auto app = reinterpret_cast<HelloTriangleApplication *>(
       glfwGetWindowUserPointer(window));
-
-  if (app->firstMouse) {
-    app->lastX = xpos;
-    app->lastY = ypos;
-    app->firstMouse = false;
-  }
-
-  float xoffset = xpos - app->lastX;
-  float yoffset = app->lastY - ypos; // reversed: y ranges bottom to top
-  app->lastX = xpos;
-  app->lastY = ypos;
-
-  xoffset *= app->mouseSensitivity;
-  yoffset *= app->mouseSensitivity;
-
-  app->yaw += xoffset;
-  app->pitch += yoffset;
-
-  // Ограничиваем pitch, чтобы не переворачиваться
-  if (app->pitch > 89.0f)
-    app->pitch = 89.0f;
-  if (app->pitch < -89.0f)
-    app->pitch = -89.0f;
-
-  // Обновляем направление камеры
-  glm::vec3 front;
-  front.x = cos(glm::radians(app->yaw)) * cos(glm::radians(app->pitch));
-  front.y = sin(glm::radians(app->pitch));
-  front.z = sin(glm::radians(app->yaw)) * cos(glm::radians(app->pitch));
-  app->cameraFront = glm::normalize(front);
+  app->camera.processMouse(xpos, ypos);
 }

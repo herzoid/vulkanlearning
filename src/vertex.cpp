@@ -1,5 +1,5 @@
 #include "vertex.hpp"
-#define GLM_ENABLE_EXPERIMENTAL
+// #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtx/hash.hpp>
 
 VkVertexInputBindingDescription Vertex::getBindingDescription() {
