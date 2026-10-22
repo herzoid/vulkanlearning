@@ -23,6 +23,7 @@ add_executable(${PROJECT_NAME}
   src/application.cpp
   src/model.cpp
   src/camera.cpp
+  src/vulkan_context.cpp
 )
 
 target_include_directories(${PROJECT_NAME} PRIVATE
@@ -41,7 +42,7 @@ target_link_libraries(${PROJECT_NAME}
   Vulkan::Vulkan
   glfw
   glm
-  tinyobjloader
-  imgui
+  #tinyobjloader
+  #imgui
 )
 

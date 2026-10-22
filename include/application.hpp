@@ -4,6 +4,8 @@
 
 #include "camera.hpp"
 #include "model.hpp"
+#include "vulkan_context.hpp"
+#include <memory>
 #include <sys/types.h>
 #include <vulkan/vulkan_core.h>
 
@@ -14,7 +16,6 @@
 #include <glm/glm.hpp>
 
 #include <cstdint>
-#include <optional>
 #include <string>
 #include <vector>
 #include <vulkan/vulkan.h>
@@ -32,21 +33,6 @@ public:
   void run();
 
 private:
-  struct QueueFamilyIndices {
-    std::optional<uint32_t> graphicsFamily;
-    std::optional<uint32_t> presentFamily;
-
-    bool isComplete() {
-      return graphicsFamily.has_value() && presentFamily.has_value();
-    }
-  };
-
-  struct SwapChainSupportDetails {
-    VkSurfaceCapabilitiesKHR capabilities;
-    std::vector<VkSurfaceFormatKHR> formats;
-    std::vector<VkPresentModeKHR> presentModes;
-  };
-
   /// @brief Loaded texture info.
   struct Texture {
     VkImage image = VK_NULL_HANDLE;
@@ -58,6 +44,8 @@ private:
     int height = 0;
   };
 
+  std::unique_ptr<VulkanContext> context_;
+
   Camera camera;
 
   std::string modelPath;
@@ -66,20 +54,11 @@ private:
 
   GLFWwindow *window;
 
-  VkInstance instance;
-  VkDebugUtilsMessengerEXT debugMessenger;
-  VkSurfaceKHR surface;
-
-  VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
-  VkDevice device;
   VkSampleCountFlagBits msaaSamples = VK_SAMPLE_COUNT_1_BIT;
 
   VkImage colorImage;
   VkDeviceMemory colorImageMemory;
   VkImageView colorImageView;
-
-  VkQueue graphicsQueue;
-  VkQueue presentQueue;
 
   VkSwapchainKHR swapChain;
   std::vector<VkImage> swapChainImages;
@@ -143,19 +122,6 @@ private:
 
   void recreateSwapChain();
 
-  void createInstance();
-
-  void populateDebugMessengerCreateInfo(
-      VkDebugUtilsMessengerCreateInfoEXT &createInfo);
-
-  void setupDebugMessenger();
-
-  void createSurface();
-
-  void pickPhysicalDevice();
-
-  void createLogicalDevice();
-
   void createSwapChain();
 
   void createImageViews();
@@ -183,10 +149,6 @@ private:
   bool hasStencilComponent(VkFormat format);
 
   void createVertexBuffer();
-
-  VkSampleCountFlagBits getMaxUsableSampleCount();
-
-  // void createTextureImage();
 
   void createTextures();
 
@@ -251,27 +213,7 @@ private:
 
   VkExtent2D chooseSwapExtent(const VkSurfaceCapabilitiesKHR &capabilities);
 
-  SwapChainSupportDetails querySwapChainSupport(VkPhysicalDevice device);
-
-  bool isDeviceSuitable(VkPhysicalDevice device);
-
-  bool checkDeviceExtensionSupport(VkPhysicalDevice device);
-
-  QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device);
-
-  std::vector<const char *> getRequiredExtensions();
-
-  bool checkValidationLayerSupport();
-
   static std::vector<char> readFile(const std::string &filename);
-
-  static VKAPI_ATTR VkBool32 VKAPI_CALL
-  debugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
-                VkDebugUtilsMessageTypeFlagsEXT messageType,
-                const VkDebugUtilsMessengerCallbackDataEXT *pCallbackData,
-                void *pUserData);
-
-  // void processInput(float deltaTime);
 
   static void mouseCallback(GLFWwindow *window, double xpos, double ypos);
 };
