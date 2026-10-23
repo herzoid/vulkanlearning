@@ -4,9 +4,9 @@
 
 #include "camera.hpp"
 #include "model.hpp"
+#include "swapchain.hpp"
 #include "vulkan_context.hpp"
 #include <memory>
-#include <sys/types.h>
 #include <vulkan/vulkan_core.h>
 
 #include <GLFW/glfw3.h>
@@ -20,15 +20,13 @@
 #include <vector>
 #include <vulkan/vulkan.h>
 
-/// @brief Главный класс Vulkan-приложения.
+/// @brief Main Vulkan Application class.
 ///
-/// Управляет жизненным циклом: инициализация Vulkan, главный цикл рендеринга,
-/// очистка ресурсов. Поддерживает загрузку моделей в формате .glb (бинарный
-/// glTF).
-class HelloTriangleApplication {
+/// Lifecycle: Vulkan initialization, render cycle,
+/// resource managing, models loading .glb (binary glTF)
+class Application {
 public:
-  HelloTriangleApplication(std::string modelPath)
-      : modelPath(std::move(modelPath)) {}
+  Application(std::string modelPath) : modelPath(std::move(modelPath)) {}
   void setWindowSize(uint32_t W, uint32_t H);
   void run();
 
@@ -60,12 +58,7 @@ private:
   VkDeviceMemory colorImageMemory;
   VkImageView colorImageView;
 
-  VkSwapchainKHR swapChain;
-  std::vector<VkImage> swapChainImages;
-  VkFormat swapChainImageFormat;
-  VkExtent2D swapChainExtent;
-  std::vector<VkImageView> swapChainImageViews;
-  std::vector<VkFramebuffer> swapChainFramebuffers;
+  std::unique_ptr<SwapChain> swapChain_;
 
   VkRenderPass renderPass;
   VkDescriptorSetLayout descriptorSetLayout;
@@ -122,17 +115,11 @@ private:
 
   void recreateSwapChain();
 
-  void createSwapChain();
-
-  void createImageViews();
-
   void createRenderPass();
 
   void createDescriptorSetLayout();
 
   void createGraphicsPipeline();
-
-  void createFramebuffers();
 
   void createCommandPool();
 
@@ -155,19 +142,15 @@ private:
   void generateMipmaps(VkImage image, VkFormat imageFormat, int32_t texWidth,
                        int32_t texHeight, uint32_t mipLevels);
 
-  // void createTextureImageView();
-
-  // void createTextureSampler();
-
   VkImageView createImageView(VkImage image, VkFormat format,
                               VkImageAspectFlags aspectFlags,
                               uint32_t mipLevels);
 
-  void createImage(uint32_t width, uint32_t height, uint32_t mipLevels,
-                   VkSampleCountFlagBits numSamples, VkFormat format,
-                   VkImageTiling tiling, VkImageUsageFlags usage,
-                   VkMemoryPropertyFlags properties, VkImage &image,
-                   VkDeviceMemory &imageMemory);
+      void createImage(uint32_t width, uint32_t height, uint32_t mipLevels,
+                       VkSampleCountFlagBits numSamples, VkFormat format,
+                       VkImageTiling tiling, VkImageUsageFlags usage,
+                       VkMemoryPropertyFlags properties, VkImage &image,
+                       VkDeviceMemory &imageMemory);
 
   void transitionImageLayout(VkImage image, VkFormat format,
                              VkImageLayout oldLayout, VkImageLayout newLayout,
@@ -204,14 +187,6 @@ private:
 
   void drawFrame();
   VkShaderModule createShaderModule(const std::vector<char> &code);
-
-  VkSurfaceFormatKHR chooseSwapSurfaceFormat(
-      const std::vector<VkSurfaceFormatKHR> &availableFormats);
-
-  VkPresentModeKHR chooseSwapPresentMode(
-      const std::vector<VkPresentModeKHR> &availablePresentModes);
-
-  VkExtent2D chooseSwapExtent(const VkSurfaceCapabilitiesKHR &capabilities);
 
   static std::vector<char> readFile(const std::string &filename);
 

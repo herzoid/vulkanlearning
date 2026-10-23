@@ -12,7 +12,7 @@ Camera::Camera(glm::vec3 startPos)
 }
 
 void Camera::processInput(GLFWwindow *window, float deltaTime) {
-  // Движение камеры (WASD)
+  // Camera (WASD)
   float speed = speed_ * deltaTime;
 
   if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) {
@@ -28,7 +28,7 @@ void Camera::processInput(GLFWwindow *window, float deltaTime) {
     position_ += right_ * speed;
   }
 
-  // Движение вверх/вниз c и space)
+  // Up and Down SPACE/C)
   if (glfwGetKey(window, GLFW_KEY_C) == GLFW_PRESS) {
     position_ -= up_ * speed;
   }

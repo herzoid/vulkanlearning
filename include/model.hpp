@@ -1,7 +1,7 @@
 #pragma once
 
-#include <string>
 #include "vertex.hpp"
+#include <string>
 
 /// @brief Pixel data, loaded from glTF, before GPU object creation
 struct TextureData {
@@ -24,14 +24,12 @@ struct LoadedModel {
   std::vector<TextureData> textures;
 };
 
-/// @brief Загружает модель из .glb (бинарный glTF).
+/// @brief Load model from file .glb (binary glTF).
 ///
-/// Поддерживает несколько мешей и текстур. Загружает геометрию,
-/// UV-координаты и все текстуры (как пиксели, без GPU-объектов).
+/// Multi meshes and textures support. Load geometry,
+/// UV and textures (as a pixels, without GPU-objects).
 ///
-/// @param filename Путь к .glb.
-/// @return LoadedModel с вершинами, индексами, мешами и текстурами.
-/// @throws std::runtime_error Если файл не .glb или не открывается.
+/// @param filename path to .glb.
+/// @return LoadedModel with vertices, indices, meshs and textures.
+/// @throws std::runtime_error If any errors opening .glb.
 LoadedModel loadGltfModel(const std::string &filename);
-
-

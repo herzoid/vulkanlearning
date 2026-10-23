@@ -2,24 +2,22 @@
 
 #include <GLFW/glfw3.h>
 #include <optional>
-#include <string>
 #include <vector>
 #include <vulkan/vulkan.h>
 
-/// @brief Хранит базовые Vulkan-объекты: Instance, Device, Queues, Surface.
+/// @brief Stores basic Vulkan objects: Instance, Device, Queues, Surface.
 ///
-/// Отвечает за инициализацию драйвера, выбор физической видеокарты,
-/// создание логического устройства и настройку очередей.
+/// Driver initialization, pick physical device,
+/// creating logical device and queues configutations.
 class VulkanContext {
 public:
   VulkanContext(GLFWwindow *window);
   ~VulkanContext();
 
-  // Запрещаем копирование, чтобы не было двойного удаления
+  // copy prohibition
   VulkanContext(const VulkanContext &) = delete;
   VulkanContext &operator=(const VulkanContext &) = delete;
 
-  // Геттеры для доступа к объектам
   VkInstance getInstance() const { return instance_; }
   VkPhysicalDevice getPhysicalDevice() const { return physicalDevice_; }
   VkDevice getDevice() const { return device_; }
@@ -27,7 +25,6 @@ public:
   VkQueue getGraphicsQueue() const { return graphicsQueue_; }
   VkQueue getPresentQueue() const { return presentQueue_; }
 
-  // Информация о семействах очередей (нужна для SwapChain)
   struct QueueFamilyIndices {
     std::optional<uint32_t> graphicsFamily;
     std::optional<uint32_t> presentFamily;
@@ -56,18 +53,21 @@ private:
   VkQueue graphicsQueue_;
   VkQueue presentQueue_;
 
-  // Приватные методы инициализации
   void createInstance();
   void setupDebugMessenger();
   void createSurface();
   void pickPhysicalDevice();
   void createLogicalDevice();
 
-  // Вспомогательные методы
+  // Helpers
   bool checkValidationLayerSupport() const;
+
   std::vector<const char *> getRequiredExtensions() const;
+
   bool isDeviceSuitable(VkPhysicalDevice device) const;
+
   bool checkDeviceExtensionSupport(VkPhysicalDevice device) const;
+
   void populateDebugMessengerCreateInfo(
       VkDebugUtilsMessengerCreateInfoEXT &createInfo) const;
 

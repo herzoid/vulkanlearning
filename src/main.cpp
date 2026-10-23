@@ -28,7 +28,7 @@ int main(int argc, char const *argv[]) {
     return EXIT_FAILURE;
   }
 
-  HelloTriangleApplication app(modelPath);
+  Application app(modelPath);
   app.setWindowSize(800, 600);
 
   try {

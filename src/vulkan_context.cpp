@@ -5,7 +5,6 @@
 #include <set>
 #include <stdexcept>
 
-// Макросы и статические переменные
 namespace {
 const std::vector<const char *> validationLayers = {
     "VK_LAYER_KHRONOS_validation"};
