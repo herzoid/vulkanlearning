@@ -4,6 +4,7 @@
 
 #include "camera.hpp"
 #include "model.hpp"
+#include "renderer.hpp"
 #include "swapchain.hpp"
 #include "vulkan_context.hpp"
 #include <memory>
@@ -65,8 +66,6 @@ private:
   VkPipelineLayout pipelineLayout;
   VkPipeline graphicsPipeline;
 
-  VkCommandPool commandPool;
-
   VkImage depthImage;
   VkDeviceMemory depthImageMemory;
   VkImageView depthImageView;
@@ -87,12 +86,11 @@ private:
   VkDescriptorPool descriptorPool;
   std::vector<std::vector<VkDescriptorSet>> descriptorSets;
 
-  std::vector<VkCommandBuffer> commandBuffers;
+  std::unique_ptr<Renderer> renderer_;
 
-  std::vector<VkSemaphore> imageAvailableSemaphores;
-  std::vector<VkSemaphore> renderFinishedSemaphores;
-  std::vector<VkFence> inFlightFences;
   uint32_t currentFrame = 0;
+
+  VkCommandPool commandPool = nullptr;
 
   bool framebufferResized = false;
 
@@ -105,6 +103,7 @@ private:
 
   static void framebufferResizeCallback(GLFWwindow *window, int width,
                                         int height);
+  void createCommandPool();
 
   void initVulkan();
 
@@ -120,8 +119,6 @@ private:
   void createDescriptorSetLayout();
 
   void createGraphicsPipeline();
-
-  void createCommandPool();
 
   void createColorResources();
 
@@ -146,11 +143,11 @@ private:
                               VkImageAspectFlags aspectFlags,
                               uint32_t mipLevels);
 
-      void createImage(uint32_t width, uint32_t height, uint32_t mipLevels,
-                       VkSampleCountFlagBits numSamples, VkFormat format,
-                       VkImageTiling tiling, VkImageUsageFlags usage,
-                       VkMemoryPropertyFlags properties, VkImage &image,
-                       VkDeviceMemory &imageMemory);
+  void createImage(uint32_t width, uint32_t height, uint32_t mipLevels,
+                   VkSampleCountFlagBits numSamples, VkFormat format,
+                   VkImageTiling tiling, VkImageUsageFlags usage,
+                   VkMemoryPropertyFlags properties, VkImage &image,
+                   VkDeviceMemory &imageMemory);
 
   void transitionImageLayout(VkImage image, VkFormat format,
                              VkImageLayout oldLayout, VkImageLayout newLayout,
@@ -164,6 +161,7 @@ private:
   void createDescriptorPool();
 
   void createDescriptorSets();
+
   void createBuffer(VkDeviceSize size, VkBufferUsageFlags usage,
                     VkMemoryPropertyFlags properties, VkBuffer &buffer,
                     VkDeviceMemory &bufferMemory);
@@ -177,15 +175,6 @@ private:
   uint32_t findMemoryType(uint32_t typeFilter,
                           VkMemoryPropertyFlags properties);
 
-  void createCommandBuffers();
-
-  void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex);
-
-  void createSyncObjects();
-
-  void updateUniformBuffer(uint32_t currentImage);
-
-  void drawFrame();
   VkShaderModule createShaderModule(const std::vector<char> &code);
 
   static std::vector<char> readFile(const std::string &filename);

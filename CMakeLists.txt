@@ -25,6 +25,7 @@ add_executable(${PROJECT_NAME}
   src/camera.cpp
   src/vulkan_context.cpp
   src/swapchain.cpp
+  src/renderer.cpp
 )
 
 target_include_directories(${PROJECT_NAME} PRIVATE
